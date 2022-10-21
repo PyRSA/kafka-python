@@ -41,6 +41,7 @@
 # The CRC covers the data from the Magic byte to the end of the message.
 
 
+from multiprocessing.sharedctypes import Value
 import struct
 import time
 
@@ -48,8 +49,8 @@ from kafka.record.abc import ABCRecord, ABCRecordBatch, ABCRecordBatchBuilder
 from kafka.record.util import calc_crc32
 
 from kafka.codec import (
-    gzip_encode, snappy_encode, lz4_encode, lz4_encode_old_kafka,
-    gzip_decode, snappy_decode, lz4_decode, lz4_decode_old_kafka,
+    gzip_encode, snappy_encode, lz4_encode, lz4_encode_old_kafka, zstd_encode,
+    gzip_decode, snappy_decode, lz4_decode, lz4_decode_old_kafka, zstd_decode
 )
 import kafka.codec as codecs
 from kafka.errors import CorruptRecordException, UnsupportedCodecError
@@ -108,6 +109,7 @@ class LegacyRecordBase(object):
     CODEC_GZIP = 0x01
     CODEC_SNAPPY = 0x02
     CODEC_LZ4 = 0x03
+    CODEC_ZSTD = 0x04
     TIMESTAMP_TYPE_MASK = 0x08
 
     LOG_APPEND_TIME = 1
@@ -122,6 +124,10 @@ class LegacyRecordBase(object):
             checker, name = codecs.has_snappy, "snappy"
         elif compression_type == self.CODEC_LZ4:
             checker, name = codecs.has_lz4, "lz4"
+        elif compression_type == self.CODEC_ZSTD:
+            checker, name = codecs.has_zstd, "zstd"
+        else:
+            checker, name = lambda: False, "Unknown"
         if not checker():
             raise UnsupportedCodecError(
                 "Libraries for {} compression codec not found".format(name))
@@ -193,6 +199,10 @@ class LegacyRecordBatch(ABCRecordBatch, LegacyRecordBase):
                 uncompressed = lz4_decode_old_kafka(data.tobytes())
             else:
                 uncompressed = lz4_decode(data.tobytes())
+        elif compression_type == self.CODEC_ZSTD:
+            uncompressed = zstd_decode(data)
+        else:
+            raise ValueError("Unknown Compression Type - %s" % compression_type)
         return uncompressed
 
     def _read_header(self, pos):
